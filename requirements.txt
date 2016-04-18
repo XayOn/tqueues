@@ -1,0 +1,2 @@
+aiohttp==0.21.5
+rethinkdb==2.2.0.post6

@@ -109,6 +109,7 @@ class Dispatcher(web.View):
               }
 
               Note that method should be importable by the workers.
+
         """
         conn = await r.connect(**self.request.app['rethinkdb'])
         await self.request.post()

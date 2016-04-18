@@ -83,48 +83,17 @@ class Dispatcher(web.View):
 
     async def get(self):
         """
-            GET request to / with data queue=queue returns a job for
-            the specified queue. It actually POPS the job from the db.
-            If the database does not exists or there are no more tasks it
-            waits for a change to happen in the database in a blocking way.
+            'pop' a task from the database
         """
         conn = await r.connect(**self.request.app['rethinkdb'])
-        qname = self.request.GET['queue']
-        queue = r.db(RT_DB).table(qname)
+        queue = r.db(RT_DB).table(self.request.GET['queue'])
 
-        async def get_next_from_cursor(cursor):
-            """ Waits for result to be ready and returns it"""
-            await cursor.fetch_next()
-            return await cursor.next()
+        cursor = await queue.changes(include_initial=True).run(conn)
+        await cursor.fetch_next()
+        result = await cursor.next()
 
-        async def get_changes():
-            """ Waits for changes, gets one and returns it"""
-            cursor = await queue.changes().run(conn)
-            result = await get_next_from_cursor(cursor)
-            return result['new_val']
-
-        # This is a bit overcomplicated
-
-        # It's like this to allow us to get the 'lost' tasks
-        # on start, so, if someone pushes tasks to the database
-        # or the server dies before dispatching everything,
-        # those tasks will be the first to be consumed.
-
-        # Then, when we finishe all available tasks (we 'sync')
-        # it starts waiting for changes in its usual way
-        try:
-            cursor = await queue.run(conn)
-            result = await get_next_from_cursor(cursor)
-        except (ReqlCursorEmpty, StopIteration):
-            result = await get_changes()
-        except ReqlOpFailedError:
-            r.db(RT_DB).table_create(qname).run(conn)
-            result = await get_changes()
-
-        try:
-            result = await queue.get(result['id']).delete().run(conn)
-            assert result['deleted'] == 1
-        except (ReqlOpFailedError, AssertionError):
+        dres = await queue.get(result['id']).delete().run(conn)
+        if dres['deleted'] == 0:
             raise Exception("This task has already been consumed")
 
         return web.Response(text=json.dumps(result))
@@ -132,7 +101,7 @@ class Dispatcher(web.View):
     async def post(self):
         """
             Creates a new task, just dumps whatever
-            we have in the database after a brief format check
+            we have to the database after a brief format check
 
               {
                 'queue': 'foo', method': 'method.to.execute',
@@ -150,6 +119,14 @@ class Dispatcher(web.View):
         queue = r.db(RT_DB).table(self.request.POST['queue'])
         await queue.insert(self.request.POST).run(conn)
         return web.Response(body=b'ok')
+
+    async def put(self):
+        """ Creates a queue. """
+        conn = await r.connect(**self.request.app['rethinkdb'])
+        qname = self.request.GET['queue']
+        r.db(RT_DB).table_create(qname).run(conn)
+        return web.Response(body=b'ok')
+
 
 
 def client(endpoint_url=False, queue=False):

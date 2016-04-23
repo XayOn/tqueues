@@ -6,11 +6,12 @@
 import sys
 import json
 import asyncio
+import inspect
 import importlib
 import aiohttp
 from aiohttp import web
 import rethinkdb as r
-from rethinkdb.errors import ReqlOpFailedError, ReqlCursorEmpty
+from rethinkdb.errors import ReqlOpFailedError
 
 
 r.set_loop_type("asyncio")
@@ -67,7 +68,9 @@ class Worker:
             try:
                 module, method = data['method'].rsplit('.', 1)
                 method = getattr(importlib.import_module(module), method)
-                return method(*data['args'], **data['kwargs'])
+                res = method(*data['args'], **data['kwargs'])
+                if inspect.iscoroutinefunction(method):
+                    asyncio.get_event_loop().run_until_complete(res)
             except:
                 pass
 

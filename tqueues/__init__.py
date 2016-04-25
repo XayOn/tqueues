@@ -60,7 +60,7 @@ class Worker:
                 method = getattr(importlib.import_module(module), method)
                 res = method(*data['args'], **data['kwargs'])
                 if inspect.iscoroutinefunction(method):
-                    asyncio.get_event_loop().run_until_complete(res)
+                    asyncio.ensure_future(res)
             except:
                 pass
 

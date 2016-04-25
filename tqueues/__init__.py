@@ -39,7 +39,7 @@ class Worker:
                     self.inserted_ids.append(response['id'])
                     return response
         except AssertionError:
-            pass
+            await asyncio.sleep(2)
 
     async def __aenter__(self):
         return self

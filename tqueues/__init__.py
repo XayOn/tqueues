@@ -23,7 +23,11 @@ class Worker:
     """
     def __init__(self, endpoint_url, queue):
         self.endpoint_url = endpoint_url
-        self.inserted_ids = []
+        self._id = False
+        self.module = False
+        self.method = False
+        self.args = []
+        self.kwargs = {}
         self.queue = queue
 
     async def __aiter__(self):
@@ -35,9 +39,10 @@ class Worker:
                 async with session.get(self.endpoint_url,
                                        params={'queue': self.queue}) as resp:
                     assert resp.status == 200
-                    response = await resp.json()
-                    self.inserted_ids.append(response['id'])
-                    return response
+                    data = await resp.json()
+                    self.module, self.method = data['method'].rsplit('.', 1)
+                    self._id = data['id']
+                    return self
         except AssertionError:
             await asyncio.sleep(2)
 
@@ -45,24 +50,29 @@ class Worker:
         return self
 
     async def __aexit__(self, exc_type, value, tback):
+        self._id = False
+        self.module = False
+        self.method = False
+        self.args = []
+        self.kwargs = {}
         with aiohttp.ClientSession() as session:
-            for _id in self.inserted_ids:
-                await session.delete(self.endpoint_url, params={'id': _id})
+            await session.delete(self.endpoint_url, params={'id': self._id})
 
     async def run_forever(self):
         """
             We iterate over the job dispatcher object
             assigned to us.
         """
-        async for data in self:
-            try:
-                module, method = data['method'].rsplit('.', 1)
-                method = getattr(importlib.import_module(module), method)
-                res = method(*data['args'], **data['kwargs'])
-                if inspect.iscoroutinefunction(method):
-                    asyncio.ensure_future(res)
-            except:
-                pass
+        async for session in self:
+            with session:
+                try:
+                    module = importlib.import_module(self.module)
+                    method = getattr(module, self.method)
+                    res = method(*self.args, **self.kwargs)
+                    if inspect.iscoroutinefunction(method):
+                        asyncio.ensure_future(res)
+                except:
+                    pass
 
 
 class Dispatcher(web.View):

@@ -17,17 +17,42 @@ r.set_loop_type("asyncio")
 RT_DB = "tqueues"
 
 
+class Job:
+    """
+        Job
+    """
+    def __init__(self, endpoint_url, data):
+        self.endpoint_url = endpoint_url
+        self.data = data
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, value, tback):
+        with aiohttp.ClientSession() as session:
+            await session.delete(self.endpoint_url, params={
+                'id': self.data["id"]})
+
+    def method(self):
+        """ Method """
+        module, method = self.data['method'].rsplit('.', 1)
+        method = getattr(importlib.import_module(module), method)
+        return method
+
+    def work(self):
+        """ Run the job """
+        args, kwargs = self.data['args'], self.data['kwargs']
+        return self.method(*args, **kwargs)
+
+
 class Worker:
     """
         Implements a simple worker over the http api
     """
+
     def __init__(self, endpoint_url, queue):
         self.endpoint_url = endpoint_url
         self._id = False
-        self.module = False
-        self.method = False
-        self.args = []
-        self.kwargs = {}
         self.queue = queue
 
     async def __aiter__(self):
@@ -40,39 +65,21 @@ class Worker:
                                        params={'queue': self.queue}) as resp:
                     assert resp.status == 200
                     data = await resp.json()
-                    self.module, self.method = data['method'].rsplit('.', 1)
-                    self._id = data['id']
-                    return self
+                    return Job(self.endpoint_url, data)
+
         except AssertionError:
             await asyncio.sleep(2)
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, exc_type, value, tback):
-        self._id = False
-        self.module = False
-        self.method = False
-        self.args = []
-        self.kwargs = {}
-        with aiohttp.ClientSession() as session:
-            await session.delete(self.endpoint_url, params={'id': self._id})
 
     async def run_forever(self):
         """
             We iterate over the job dispatcher object
             assigned to us.
         """
-        async for session in self:
-            with session:
-                try:
-                    module = importlib.import_module(self.module)
-                    method = getattr(module, self.method)
-                    res = method(*self.args, **self.kwargs)
-                    if inspect.iscoroutinefunction(method):
-                        asyncio.ensure_future(res)
-                except:
-                    pass
+        async for job in self:
+            with job:
+                res = job.work()
+                if inspect.iscoroutine(res):
+                    asyncio.ensure_future(res)
 
 
 class Dispatcher(web.View):

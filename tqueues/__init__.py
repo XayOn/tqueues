@@ -17,6 +17,11 @@ r.set_loop_type("asyncio")
 RT_DB = "tqueues"
 
 
+def test(*args, **kwargs):
+    """ Test function for worker"""
+    return all([('1' in args), (kwargs["1"] == "2")])
+
+
 class Job:
     """
         Job
@@ -33,6 +38,7 @@ class Job:
             await session.delete(self.endpoint_url, params={
                 'id': self.data["id"]})
 
+    @property
     def method(self):
         """ Method """
         module, method = self.data['method'].rsplit('.', 1)

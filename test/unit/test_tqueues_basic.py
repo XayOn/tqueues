@@ -94,3 +94,50 @@ class TestWorker:
             assert self.deleted
             if enum == 9:
                 break
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('id', list(range(10)))
+    async def test_queue_creation(self, create_server, id):
+        from tqueues import Worker
+
+        self.deleted = False
+        self.created = False
+
+        def get_response():
+            """ Get response json """
+            for id in range(10):
+                yield {
+                    'queue': id,
+                    'args': [id],
+                    'kwargs': {'param': id},
+                    'method': 'tqueues.test',
+                    'id': id
+                }
+
+        response = get_response()
+
+        async def handler(request):
+            """
+                Return always test task
+            """
+            raise web.HTTPNotImplemented()
+
+        async def handler_put(request):
+            """ PUT stuff """
+            self.created = True
+            return web.Response(body=b'OK')
+
+        self.current_response = next(response)
+
+        app, url = await create_server()
+        app.router.add_route('GET', '/', handler)
+        app.router.add_route('PUT', '/', handler_put)
+        worker = Worker(url, self.current_response)
+
+        enum = 0
+        async for job in worker:
+            enum += 1
+            job
+            assert self.created
+            if enum == 9:
+                break

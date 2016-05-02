@@ -70,12 +70,15 @@ class Worker:
     async def __anext__(self):
         try:
             with aiohttp.ClientSession() as session:
-                async with session.get(self.endpoint_url,
-                                       params={'queue': self.queue}) as resp:
+                args = (self.endpoint_url,)
+                kwargs = {"params": {'queue': self.queue}}
+                async with session.get(*args, **kwargs) as resp:
+                    if resp.status == 501:
+                        async with session.put(*args, **kwargs) as resp:
+                            assert resp.status == 200
                     assert resp.status == 200
                     data = await resp.json()
                     return Job(self.endpoint_url, data)
-
         except AssertionError:
             await asyncio.sleep(2)
 
@@ -85,7 +88,8 @@ class Worker:
             assigned to us.
         """
         async for job in self:
-            await job.work()
+            if job:
+                await job.work()
 
 
 class Dispatcher(web.View):
@@ -133,10 +137,15 @@ class Dispatcher(web.View):
         mandatory = ['queue', 'args', 'kwargs', 'method']
         assert all([a in self.request.POST for a in mandatory])
 
-        queue = r.db(RT_DB).table(self.request.POST['queue'])
-        data = dict(self.request.POST)
-        data.update({'status': 'pending'})
-        await queue.insert(data).run(conn)
+        try:
+            queue = r.db(RT_DB).table(self.request.POST['queue'])
+            data = dict(self.request.POST)
+            data.update({'status': 'pending'})
+            await queue.insert(data).run(conn)
+        except Exception as err:
+            if 'does not exist.' in err.message:
+                raise web.HTTPNotImplemented()
+            raise web.HTTPNotFound('No more tasks')
         return web.Response(body=b'ok')
 
     async def put(self):

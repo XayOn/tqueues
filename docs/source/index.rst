@@ -6,11 +6,11 @@
 Welcome to Tqueues's documentation!
 ===================================
 
-Contents:
+.. include:: Readme.rst
 
 .. toctree::
+   API
    :maxdepth: 2
-
 
 
 Indices and tables

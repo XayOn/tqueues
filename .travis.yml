@@ -35,7 +35,7 @@ env:
 sudo: required
 
 install: 
-    - pip install -U tox
+    - pip install -U tox setuptools pbr
     - pip install -r requirements.txt
 # - sudo apt-get install libxml2-dev libxslt1-dev
 #

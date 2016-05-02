@@ -7,6 +7,7 @@ import sys
 import json
 import asyncio
 import inspect
+from contextlib import suppress
 import importlib
 import aiohttp
 from aiohttp import web
@@ -137,12 +138,13 @@ class Dispatcher(web.View):
         mandatory = ['queue', 'args', 'kwargs', 'method']
         assert all([a in self.request.POST for a in mandatory])
 
+        queue = r.db(RT_DB).table(self.request.POST['queue'])
+        data = dict(self.request.POST)
+        data.update({'status': 'pending'})
+
         try:
-            queue = r.db(RT_DB).table(self.request.POST['queue'])
-            data = dict(self.request.POST)
-            data.update({'status': 'pending'})
             await queue.insert(data).run(conn)
-        except Exception as err:
+        except r.errors.ReqlOpFailedError as err:
             if 'does not exist.' in err.message:
                 raise web.HTTPNotImplemented()
             raise web.HTTPNotFound('No more tasks')
@@ -152,7 +154,9 @@ class Dispatcher(web.View):
         """ Creates a queue. """
         conn = await r.connect(**self.request.app['rethinkdb'])
         qname = self.request.GET['queue']
-        r.db(RT_DB).table_create(qname).run(conn)
+        with suppress(r.errors.ReqlOpFailedError):
+            r.db(RT_DB).table_create(qname).run(conn)
+
         return web.Response(body=b'ok')
 
     async def delete(self):

@@ -1,0 +1,6 @@
+channels:
+    - clinicalgraphics
+dependencies:
+    - python >=3.5,<3.6
+    - pytest-asyncio
+    - sphinxcontrib-httpdomain

@@ -8,6 +8,8 @@ class TestWorker:
     async def test_single_task(self, create_server, id):
         from tqueues import Worker
 
+        self.deleted = False
+
         def get_response(id):
             """ Get response json """
             return {
@@ -30,6 +32,7 @@ class TestWorker:
             """
                 DELETED stuff
             """
+            self.deleted = True
             return web.Response(body=b'OK')
 
         app, url = await create_server()
@@ -42,12 +45,15 @@ class TestWorker:
                 result = job.work()
                 assert result == tuple([tuple(response['args']),
                                         response['kwargs']])
-                break
+            assert self.deleted
+            break
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize('id', list(range(10)))
     async def test_multi_task(self, create_server, id):
         from tqueues import Worker
+
+        self.deleted = False
 
         def get_response():
             """ Get response json """
@@ -73,6 +79,7 @@ class TestWorker:
             """
                 DELETED stuff
             """
+            self.deleted = True
             return web.Response(body=b'OK')
 
         app, url = await create_server()
@@ -80,9 +87,13 @@ class TestWorker:
         app.router.add_route('DELETE', '/', handler_del)
         worker = Worker(url, "test")
 
+        enum = 0
         async for job in worker:
+            enum += 1
             async with job:
                 result = job.work()
                 assert result == tuple([tuple(self.current_response['args']),
                                         self.current_response['kwargs']])
+            assert self.deleted
+            if enum == 9:
                 break

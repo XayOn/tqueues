@@ -2,37 +2,87 @@ import pytest
 from aiohttp import web
 
 
-@pytest.mark.asyncio
-async def test_tqueue_worker_can_process_a_normal_task(create_server):
-    from tqueues import Worker
+class TestWorker:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('id', list(range(10)))
+    async def test_single_task(self, create_server, id):
+        from tqueues import Worker
 
-    response = {
-        'queue': 'test',
-        'args': ["1"],
-        'kwargs': {"1": "2"},
-        'method': 'tqueues.test',
-        'id': 1
-    }
+        def get_response(id):
+            """ Get response json """
+            return {
+                'queue': 'test',
+                'args': [id],
+                'kwargs': {'param': id},
+                'method': 'tqueues.test',
+                'id': id
+            }
 
-    async def handler(request):
-        """
-            Return always test task
-        """
-        return web.json_response(response)
+        response = get_response(id)
 
-    async def handler_del(request):
-        """
-            DELETED stuff
-        """
-        return web.Response(body=b'OK')
+        async def handler(request):
+            """
+                Return always test task
+            """
+            return web.json_response(response)
 
-    app, url = await create_server()
-    app.router.add_route('GET', '/', handler)
-    app.router.add_route('DELETE', '/', handler_del)
-    worker = Worker(url, "test")
+        async def handler_del(request):
+            """
+                DELETED stuff
+            """
+            return web.Response(body=b'OK')
 
-    async for job in worker:
-        async with job:
-            result = job.work()
-            assert result is True
-            break
+        app, url = await create_server()
+        app.router.add_route('GET', '/', handler)
+        app.router.add_route('DELETE', '/', handler_del)
+        worker = Worker(url, "test")
+
+        async for job in worker:
+            async with job:
+                result = job.work()
+                assert result == tuple([tuple(response['args']),
+                                        response['kwargs']])
+                break
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('id', list(range(10)))
+    async def test_multi_task(self, create_server, id):
+        from tqueues import Worker
+
+        def get_response():
+            """ Get response json """
+            for id in range(10):
+                yield {
+                    'queue': 'test',
+                    'args': [id],
+                    'kwargs': {'param': id},
+                    'method': 'tqueues.test',
+                    'id': id
+                }
+
+        response = get_response()
+
+        async def handler(request):
+            """
+                Return always test task
+            """
+            self.current_response = next(response)
+            return web.json_response(self.current_response)
+
+        async def handler_del(request):
+            """
+                DELETED stuff
+            """
+            return web.Response(body=b'OK')
+
+        app, url = await create_server()
+        app.router.add_route('GET', '/', handler)
+        app.router.add_route('DELETE', '/', handler_del)
+        worker = Worker(url, "test")
+
+        async for job in worker:
+            async with job:
+                result = job.work()
+                assert result == tuple([tuple(self.current_response['args']),
+                                        self.current_response['kwargs']])
+                break

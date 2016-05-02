@@ -19,7 +19,7 @@ RT_DB = "tqueues"
 
 def test(*args, **kwargs):
     """ Test function for worker"""
-    return all([('1' in args), (kwargs["1"] == "2")])
+    return args, kwargs
 
 
 class Job:

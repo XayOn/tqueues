@@ -41,10 +41,8 @@ class TestWorker:
         worker = Worker(url, "test")
 
         async for job in worker:
-            async with job:
-                result = job.work()
-                assert result == tuple([tuple(response['args']),
-                                        response['kwargs']])
+            assert await job.work() == tuple([tuple(response['args']),
+                                    response['kwargs']])
             assert self.deleted
             break
 
@@ -90,10 +88,9 @@ class TestWorker:
         enum = 0
         async for job in worker:
             enum += 1
-            async with job:
-                result = job.work()
-                assert result == tuple([tuple(self.current_response['args']),
-                                        self.current_response['kwargs']])
+            res = await job.work()
+            assert res == tuple([tuple(self.current_response['args']),
+                                 self.current_response['kwargs']])
             assert self.deleted
             if enum == 9:
                 break

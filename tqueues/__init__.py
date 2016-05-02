@@ -45,10 +45,13 @@ class Job:
         method = getattr(importlib.import_module(module), method)
         return method
 
-    def work(self):
+    async def work(self):
         """ Run the job """
-        args, kwargs = self.data['args'], self.data['kwargs']
-        return self.method(*args, **kwargs)
+        async with self:
+            args, kwargs = self.data['args'], self.data['kwargs']
+            if inspect.iscoroutinefunction(self.method):
+                return await self.method(*args, **kwargs)
+            return self.method(*args, **kwargs)
 
 
 class Worker:
@@ -82,10 +85,7 @@ class Worker:
             assigned to us.
         """
         async for job in self:
-            with job:
-                res = job.work()
-                if inspect.iscoroutine(res):
-                    asyncio.ensure_future(res)
+            await job.work()
 
 
 class Dispatcher(web.View):

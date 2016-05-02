@@ -36,6 +36,6 @@ sudo: required
 
 install: 
     - pip install -U tox
-    - sudo apt-get install libxml2-dev libxslt1-dev python3-libtorrent
+# - sudo apt-get install libxml2-dev libxslt1-dev
 language: python
 script: tox

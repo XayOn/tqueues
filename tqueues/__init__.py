@@ -363,23 +363,13 @@ async def wshandler(request):
     ws = web.WebSocketResponse()
     await ws.prepare(request)
 
-    async for msg in ws:
-        if msg.tp == aiohttp.MsgType.text:
-            if msg.data == 'close':
-                await ws.close()
-            else:
-                conn = await r.connect(**request.app['rethinkdb'])
-                queue = r.db(RT_DB).table(request.GET['queue'])
-                filter_ = queue.filter({'status': TASK_STARTED})
-                cursor = await filter_.changes(include_initial=True).run(conn)
-                logging.info("Waiting for filter change")
-                while cursor.fetch_next():
-                    result = await cursor.next()['new_val']
-                    logging.debug("Got result: %s", result)
-                    ws.send_str(result)
+    conn = await r.connect(**request.app['rethinkdb'])
+    queue = r.db(RT_DB).table(request.GET['queue'])
+    filter_ = queue.filter({'status': TASK_STARTED})
+    cursor = await filter_.changes(include_initial=True).run(conn)
 
-        elif msg.tp == aiohttp.MsgType.error:
-            logging.info('Exception on ws: %s', ws.exception())
+    while cursor.fetch_next():
+        ws.send_str(json.dumps(dict(await cursor.next())['new_val']))
 
     return ws
 

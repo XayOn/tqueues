@@ -26,8 +26,12 @@ TASK_FINISHED = 'finished'
 TASK_STARTED = 'started'
 
 
-def test(*args, **kwargs):
+async def test(*args, **kwargs):
     """ Test function for worker"""
+    curr_data = kwargs['tq_parent_job'].data.copy()
+    curr_data.update({'foo': 'bar'})
+    await kwargs['tq_parent_job'].update(curr_data)
+    await asyncio.sleep(10)
     return args, kwargs
 
 
@@ -44,13 +48,16 @@ class Job:
 
     async def __aexit__(self, exc_type, value, tback):
         with aiohttp.ClientSession() as session:
+            queue = self.data['queue']
             await session.delete(self.endpoint_url, params={
-                'id': self.data["id"], 'queue': self.data['queue']})
+                'id': self.data["id"], 'queue': queue})
 
     async def update(self, data):
         """ Update remote object in the database directly """
         with aiohttp.ClientSession() as session:
-            await session.patch(self.endpoint_url, data=data)
+            queue = self.data['queue']
+            await session.patch(self.endpoint_url, params={
+                "queue": queue, 'id': self.data['id']}, data=data)
 
     @property
     def method(self):
@@ -69,6 +76,7 @@ class Job:
         async with self:
             try:
                 args, kwargs = self.data['args'], self.data['kwargs']
+                kwargs.update({'tq_parent_job': self})
                 if inspect.iscoroutinefunction(self.method):
                     return await self.method(*args, **kwargs)
                 return self.method(*args, **kwargs)
@@ -255,12 +263,13 @@ class Dispatcher(web.View):
         data.update({'status': TASK_PENDING})
 
         try:
-            await queue.insert(data).run(conn)
+            id_ = await queue.insert(data).run(conn)
         except r.errors.ReqlOpFailedError as err:
             if 'does not exist.' in err.message:
                 raise web.HTTPNotImplemented()
             raise web.HTTPNotFound('No more tasks')
-        return web.Response(body=b'ok')
+        data.update({'id': id_['generated_keys'][0]})
+        return web.json_response(data)
 
     async def put(self):
         """
@@ -329,9 +338,10 @@ class Dispatcher(web.View):
         """
         conn = await r.connect(**self.request.app['rethinkdb'])
         queue = r.db(RT_DB).table(self.request.GET['queue'])
-        queue.get({'id': self.request.GET['id']}).update(
+        res = await queue.get(self.request.GET['id']).update(
             {'status': TASK_FINISHED}).run(conn)
-        return web.Response(body=b'ok')
+        assert res['replaced'] == 1
+        return web.json_response(res)
 
     async def patch(self):
         """
@@ -342,9 +352,36 @@ class Dispatcher(web.View):
         """
         conn = await r.connect(**self.request.app['rethinkdb'])
         queue = r.db(RT_DB).table(self.request.GET['queue'])
-        queue.get({'id': self.request.GET['id']}).update(
-            await self.request.post()).run(conn)
-        return web.Response(body=b'ok')
+        data = await self.request.post()
+        res = await queue.get(self.request.GET['id']).update(data).run(conn)
+        assert res['replaced'] == 1
+        return web.json_response(res)
+
+
+async def wshandler(request):
+    """ Websocket handler """
+    ws = web.WebSocketResponse()
+    await ws.prepare(request)
+
+    async for msg in ws:
+        if msg.tp == aiohttp.MsgType.text:
+            if msg.data == 'close':
+                await ws.close()
+            else:
+                conn = await r.connect(**request.app['rethinkdb'])
+                queue = r.db(RT_DB).table(request.GET['queue'])
+                filter_ = queue.filter({'status': TASK_STARTED})
+                cursor = await filter_.changes(include_initial=True).run(conn)
+                logging.info("Waiting for filter change")
+                while cursor.fetch_next():
+                    result = await cursor.next()['new_val']
+                    logging.debug("Got result: %s", result)
+                    ws.send_str(result)
+
+        elif msg.tp == aiohttp.MsgType.error:
+            logging.info('Exception on ws: %s', ws.exception())
+
+    return ws
 
 
 def client(endpoint_url=False, queue=False):
@@ -407,6 +444,6 @@ def server():
     cors = aiohttp_cors.setup(app, defaults={
         dom: default_opts for dom in allowed_domains})
 
-    resource = cors.add(app.router.add_resource("/"))
-    cors.add(resource.add_route('*', Dispatcher))
+    cors.add(cors.add(app.router.add_resource('/')).add_route('*', Dispatcher))
+    cors.add(cors.add(app.router.add_resource('/ws')).add_route('*', wshandler))
     web.run_app(app)

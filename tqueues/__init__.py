@@ -3,13 +3,16 @@
     Tqueues - Simple queues management
 """
 
+import os
 import sys
 import json
 import asyncio
 import inspect
+import configparser
 from contextlib import suppress
 import importlib
 import aiohttp
+import aiohttp_cors
 from aiohttp import web
 import rethinkdb as r
 
@@ -42,6 +45,11 @@ class Job:
             await session.delete(self.endpoint_url, params={
                 'id': self.data["id"]})
 
+    async def update(self, data):
+        """ Update remote object in the database directly """
+        with aiohttp.ClientSession() as session:
+            await session.patch(self.endpoint_url, data=data)
+
     @property
     def method(self):
         """ Method """
@@ -50,7 +58,12 @@ class Job:
         return method
 
     async def work(self):
-        """ Run the job """
+        """
+            Run the job
+
+            .. warning:: Job MUST accept a named parameter ``job``
+            containing this object.
+        """
         async with self:
             args, kwargs = self.data['args'], self.data['kwargs']
             if inspect.iscoroutinefunction(self.method):
@@ -314,6 +327,19 @@ class Dispatcher(web.View):
             {'status': TASK_FINISHED}).execute(conn)
         return web.Response(body=b'ok')
 
+    async def patch(self):
+        """
+           TODO: this should update something in the database
+           The thing is we need to update data in the database
+           from the job, and the job might not be able to
+           access rerhinkdb for itself, so...
+        """
+        conn = await r.connect(**self.request.app['rethinkdb'])
+        db_ = r.db(RT_DB)
+        db_.get({'id': self.request.GET['id']}).update(
+            await self.request.post()).execute(conn)
+        return web.Response(body=b'ok')
+
 
 def client(endpoint_url=False, queue=False):
     """
@@ -327,12 +353,57 @@ def client(endpoint_url=False, queue=False):
     return loop.close()
 
 
-def server(**kwargs):
+def server():
     """
        Starts main dispatching server
-       Accepts any connection argument that rethinkdb accepts.
+
+       Reads configuration from ~/.tqueues.conf
+       Configuration must follow the format:
+
+       [rethinkdb]
+       any = param
+       that = rethinkdb
+       can = accept
+
+       [cors]
+       allowed_domains = a, list, of, domains (with protocol)
     """
+
+    def get_config_as_dict(config):
+        def _get_opts(section):
+            for option in config.options(section):
+                yield config.get(section, option)
+
+        results = {}
+        for section in config.sections():
+            results[section] = list(_get_opts(section))
+        return results
+
+    rethinkdb_opts = {}
+    allowed_domains = []
+
+    config = configparser.ConfigParser()
+    config.read(os.path.expanduser('~/.tqueues.conf'))
+    config_ = get_config_as_dict(config)
+
+    with suppress(configparser.NoSectionError):
+        rethinkdb_opts = config_['rethinkdb']
+
+    with suppress(configparser.NoSectionError):
+        allowed_domains = config_['cors']['allowed_domains'].split(',')
+        allowed_domains = [a.strip() for a in allowed_domains]
+
     app = web.Application()
-    app.router.add_route('*', '/', Dispatcher)
-    app['rethinkdb'] = kwargs
+    app['rethinkdb'] = rethinkdb_opts
+
+    cors = aiohttp_cors.setup(app)
+    resource = cors.add(app.router.add_resource("/"))
+    default_opts = aiohttp_cors.ResourceOptions(
+        allow_credentials=True,
+        expose_headers=("X-Custom-Server-Header",),
+        allow_headers=("X-Requested-With", "Content-Type"),
+        max_age=3600,
+    )
+    cors.add(resource.add_route('*', Dispatcher),
+             {dom: default_opts for dom in allowed_domains})
     web.run_app(app)

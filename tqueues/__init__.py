@@ -5,6 +5,7 @@
 
 import os
 import sys
+import logging
 import json
 import asyncio
 import inspect
@@ -17,6 +18,7 @@ from aiohttp import web
 import rethinkdb as r
 
 
+logging.basicConfig(level=logging.DEBUG)
 r.set_loop_type("asyncio")
 RT_DB = "tqueues"
 TASK_PENDING = 'pending'
@@ -43,7 +45,7 @@ class Job:
     async def __aexit__(self, exc_type, value, tback):
         with aiohttp.ClientSession() as session:
             await session.delete(self.endpoint_url, params={
-                'id': self.data["id"]})
+                'id': self.data["id"], 'queue': self.data['queue']})
 
     async def update(self, data):
         """ Update remote object in the database directly """
@@ -65,10 +67,13 @@ class Job:
             containing this object.
         """
         async with self:
-            args, kwargs = self.data['args'], self.data['kwargs']
-            if inspect.iscoroutinefunction(self.method):
-                return await self.method(*args, **kwargs)
-            return self.method(*args, **kwargs)
+            try:
+                args, kwargs = self.data['args'], self.data['kwargs']
+                if inspect.iscoroutinefunction(self.method):
+                    return await self.method(*args, **kwargs)
+                return self.method(*args, **kwargs)
+            except:
+                return False
 
 
 class Worker:
@@ -158,29 +163,25 @@ class Dispatcher(web.View):
         """
         conn = await r.connect(**self.request.app['rethinkdb'])
         queue = r.db(RT_DB).table(self.request.GET['queue'])
+        filter_ = queue.filter({'status': TASK_PENDING})
 
-        cursor = await queue.changes(include_initial=True).run(conn)
+        cursor = await filter_.changes(include_initial=True).run(conn)
         await cursor.fetch_next()
         result = await cursor.next()
 
-        # TODO: there is a race condition here. If the workers are
-        # harassing the dispatcher and the jobs to execute are either
-        # running real quick or failing, they may be reexecuted, as
-        # this will be updated (to complete).
-        # As a temporary workaround, I'm checking if the task is completed
-        # just before getting it, it is ALMOST atomic, yet the race condition
-        # may still happen...
-
         try:
-            dres = await queue.get(result['id']).run(conn)
+            new_id = result['new_val']['id']
+            dres = await queue.get(new_id).run(conn)
             assert dres['status'] != TASK_FINISHED
-            dres = await queue.get(result['id']).update(
+            assert dres['status'] != TASK_STARTED
+            dres = await queue.get(new_id).update(
                 {'status': TASK_STARTED}).run(conn)
-            assert dres['updated'] == 0
+            assert dres['replaced'] != 0
         except AssertionError:
-            raise web.HTTPNotFound("This task has already been consumed")
+            logging.debug('Task is being consumed already')
+            raise web.HTTPNotFound()
 
-        return web.Response(text=json.dumps(result))
+        return web.Response(text=json.dumps(result['new_val']))
 
     async def post(self):
         """
@@ -241,12 +242,16 @@ class Dispatcher(web.View):
         conn = await r.connect(**self.request.app['rethinkdb'])
         await self.request.post()
 
-        mandatory = ['queue', 'args', 'kwargs', 'method']
+        mandatory = ['queue', 'method']
         if not all([a in self.request.POST for a in mandatory]):
             raise web.HTTPBadRequest()
 
         queue = r.db(RT_DB).table(self.request.POST['queue'])
         data = dict(self.request.POST)
+        if 'args' not in data:
+            data['args'] = []
+        if 'kwargs' not in data:
+            data['kwargs'] = {}
         data.update({'status': TASK_PENDING})
 
         try:
@@ -294,7 +299,7 @@ class Dispatcher(web.View):
 
     async def delete(self):
         """
-        .. http:delete:: /?id={string:id}
+        .. http:delete:: /?queue={string:queue}&id={string:id}
 
         Marks a task as completed
 
@@ -302,7 +307,7 @@ class Dispatcher(web.View):
 
         .. sourcecode:: http
 
-            DELETE /?id=foo
+            DELETE /?id=foo&queue=bar
             Host: example.com
             Accept: application/json, text/javascript
 
@@ -317,14 +322,15 @@ class Dispatcher(web.View):
             ok
 
         :query id: id to mark as completed
+        :query queue: queue (table) to work on
         :statuscode 200: This method always should return 200
 
 
         """
         conn = await r.connect(**self.request.app['rethinkdb'])
-        db_ = r.db(RT_DB)
-        db_.get({'id': self.request.GET['id']}).update(
-            {'status': TASK_FINISHED}).execute(conn)
+        queue = r.db(RT_DB).table(self.request.GET['queue'])
+        queue.get({'id': self.request.GET['id']}).update(
+            {'status': TASK_FINISHED}).run(conn)
         return web.Response(body=b'ok')
 
     async def patch(self):
@@ -335,9 +341,9 @@ class Dispatcher(web.View):
            access rerhinkdb for itself, so...
         """
         conn = await r.connect(**self.request.app['rethinkdb'])
-        db_ = r.db(RT_DB)
-        db_.get({'id': self.request.GET['id']}).update(
-            await self.request.post()).execute(conn)
+        queue = r.db(RT_DB).table(self.request.GET['queue'])
+        queue.get({'id': self.request.GET['id']}).update(
+            await self.request.post()).run(conn)
         return web.Response(body=b'ok')
 
 
@@ -372,11 +378,11 @@ def server():
     def get_config_as_dict(config):
         def _get_opts(section):
             for option in config.options(section):
-                yield config.get(section, option)
+                yield option, config.get(section, option)
 
         results = {}
         for section in config.sections():
-            results[section] = list(_get_opts(section))
+            results[section] = dict(_get_opts(section))
         return results
 
     rethinkdb_opts = {}
@@ -386,24 +392,21 @@ def server():
     config.read(os.path.expanduser('~/.tqueues.conf'))
     config_ = get_config_as_dict(config)
 
-    with suppress(configparser.NoSectionError):
+    with suppress(KeyError):
         rethinkdb_opts = config_['rethinkdb']
 
-    with suppress(configparser.NoSectionError):
+    with suppress(KeyError):
         allowed_domains = config_['cors']['allowed_domains'].split(',')
         allowed_domains = [a.strip() for a in allowed_domains]
 
     app = web.Application()
     app['rethinkdb'] = rethinkdb_opts
 
-    cors = aiohttp_cors.setup(app)
-    resource = cors.add(app.router.add_resource("/"))
     default_opts = aiohttp_cors.ResourceOptions(
-        allow_credentials=True,
-        expose_headers=("X-Custom-Server-Header",),
-        allow_headers=("X-Requested-With", "Content-Type"),
-        max_age=3600,
-    )
-    cors.add(resource.add_route('*', Dispatcher),
-             {dom: default_opts for dom in allowed_domains})
+        allow_credentials=True, expose_headers="*", allow_headers="*")
+    cors = aiohttp_cors.setup(app, defaults={
+        dom: default_opts for dom in allowed_domains})
+
+    resource = cors.add(app.router.add_resource("/"))
+    cors.add(resource.add_route('*', Dispatcher))
     web.run_app(app)

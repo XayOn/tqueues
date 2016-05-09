@@ -28,10 +28,14 @@ TASK_STARTED = 'started'
 
 async def test(*args, **kwargs):
     """ Test function for worker"""
+    import datetime
     curr_data = kwargs['tq_parent_job'].data.copy()
+    curr_data.update({'date_start':
+                      datetime.datetime.today().strftime('%D %H:%M')})
+    await kwargs['tq_parent_job'].update(curr_data)
+    await asyncio.sleep(5)
     curr_data.update({'foo': 'bar'})
     await kwargs['tq_parent_job'].update(curr_data)
-    await asyncio.sleep(10)
     return args, kwargs
 
 

@@ -365,8 +365,7 @@ async def wshandler(request):
 
     conn = await r.connect(**request.app['rethinkdb'])
     queue = r.db(RT_DB).table(request.GET['queue'])
-    filter_ = queue.filter({'status': TASK_STARTED})
-    cursor = await filter_.changes(include_initial=True).run(conn)
+    cursor = await queue.changes(include_initial=True).run(conn)
 
     while cursor.fetch_next():
         ws.send_str(json.dumps(dict(await cursor.next())['new_val']))

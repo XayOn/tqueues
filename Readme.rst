@@ -58,6 +58,7 @@ Tqueues job dispatcher
 ----------------------
 
 ::
+
     Usage:
         tqueues_dispatcher --db "db" --host "127.0.0.1" --port 28015
         tqueues_dispatcher --db "db" --host "127.0.0.1"

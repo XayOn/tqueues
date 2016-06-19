@@ -1,0 +1,23 @@
+CHANGES
+=======
+
+0.1.2
+-----
+
+* Now we can execute coroutines
+
+0.1.0
+-----
+
+* version bump
+* emptyreadme
+* Readme rename
+* Readme rename -a
+* cfg
+* Queue creation is now up the client, also implemented changes' include_initial=True
+* GPL
+* Rename
+* Added empty readme
+* gitignore
+* Deleted .eggs
+* Initial commit

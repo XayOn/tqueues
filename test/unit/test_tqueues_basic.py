@@ -41,7 +41,9 @@ class TestWorker:
         worker = Worker(url, "test")
 
         async for job in worker:
-            assert await job.work() == tuple([tuple(response['args']),
+            result = await job.work()
+            job = result.pop('tq_parent_job')
+            assert result == tuple([tuple(response['args']),
                                     response['kwargs']])
             assert self.deleted
             break

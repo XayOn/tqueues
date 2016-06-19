@@ -6,3 +6,8 @@ dependencies:
     - pip:
         - pytest-asyncio==0.3.0
         - sphinxcontrib-httpdomain
+        - aiohttp==0.21.5
+        - pbr
+        - docopt==0.6.2
+        - rethinkdb==2.2.0.post6
+        - aiohttp_cors

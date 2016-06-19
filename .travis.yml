@@ -26,7 +26,7 @@ deploy:
   provider: pypi
   true:
     condition: $TOXENV == py35
-    repo: XayOn/torrentstream
+    repo: XayOn/tqueues
     tags: true
 
 env:
@@ -34,11 +34,9 @@ env:
 
 sudo: required
 
-install: 
+install:
     - pip install -U tox setuptools pbr
     - pip install -r requirements.txt
-# - sudo apt-get install libxml2-dev libxslt1-dev
-#
 language: python
 python:
     - "3.5"

@@ -9,10 +9,15 @@ Usage:
     tqueues_worker --queue <queue>
 
 Options:
+    --endpoint_url <ENDPOINT_URL>    TQueues dispatcher endpoint
+    --host         <host>            Rethinkdb host
+    --db           <db>              Rethinkdb databaes
+    --port         <port>            Rethinkdb port
+    --user         <user>            Rethinkdb user
+    --password     <password>        Rethinkdb password
+    --queue        <QUEUE>           Endpoint queue to listen on
     -h --help                        Show this screen
     -v --version                     Show version
-    --endpoint_url <ENDPOINT_URL>    TQueues dispatcher endpoint
-    --queue        <QUEUE>           Endpoint queue to listen on
 
 Examples:
     tqueues_worker --endpoint_url http://127.0.0.1:800/ --queue testqueue
@@ -20,6 +25,7 @@ Examples:
 """
 
 from docopt import docopt
+import rethinkdb as r
 import aiohttp
 import asyncio
 import inspect
@@ -31,12 +37,16 @@ def client():
         Client
     """
     opts = docopt(__doc__, version="0.0.1")
+    endpoint_url = False
 
-    endpoint_url = opts['endpoint_url']
-    queue = opts['queue']
+    with suppress(KeyError):
+        endpoint_url = opts.pop('endpoint_url')
+    queue = opts.pop('queue')
+    rethinkdb = opts
 
     loop = asyncio.get_event_loop()
-    loop.run_until_complete(Worker(endpoint_url, queue).run_forever())
+    runner = Worker(endpoint_url, rethinkdb, queue).run_forever()
+    loop.run_until_complete(runner)
     return loop.close()
 
 
@@ -52,8 +62,9 @@ class Job:
         using the update method of tq_parent_job.
 
     """
-    def __init__(self, endpoint_url, data):
+    def __init__(self, endpoint_url, rethinkdb, data):
         self.endpoint_url = endpoint_url
+        self.rethinkdb = rethinkdb
         self.data = data
 
     async def __aenter__(self):
@@ -68,14 +79,24 @@ class Job:
     async def update(self, data):
         """
             Update remote object in the database providing `data`
+            If rethinkdb connection parameters are specified, they're
+            used instead of the patch in the endpoint.
 
-            .. TODO::
-                Implement #2
+            .. warning:: If you specify different rethinkdb parameters
+                         here than the used on the endpoint, it'll lead to
+                         unexpected behavior
         """
-        with aiohttp.ClientSession() as session:
-            queue = self.data['queue']
-            await session.patch(self.endpoint_url, params={
-                "queue": queue, 'id': self.data['id']}, data=data)
+        if not self.rethinkdb:
+            with aiohttp.ClientSession() as session:
+                queue = self.data['queue']
+                return await session.patch(self.endpoint_url, params={
+                    "queue": queue, 'id': self.data['id']}, data=data)
+        else:
+            opts = self.rethinkdb
+            conn = await r.connect(**opts)
+            queue = r.db(self.rethinkdb['db']).table(self.queue)
+            return await queue.get(self.request.GET['id']).update(data).run(
+                conn)
 
     @property
     def method(self):
@@ -110,8 +131,9 @@ class Worker:
         Implements a simple worker over the http api
     """
 
-    def __init__(self, endpoint_url, queue):
+    def __init__(self, endpoint_url, rethinkdb, queue):
         self.endpoint_url = endpoint_url
+        self.rethinkdb = rethinkdb
         self._id = False
         self.queue = queue
 
@@ -129,7 +151,7 @@ class Worker:
                             assert resp.status == 200
                     assert resp.status == 200
                     data = await resp.json()
-                    return Job(self.endpoint_url, data)
+                    return Job(self.endpoint_url, self.rethinkdb, data)
         except AssertionError:
             await asyncio.sleep(2)
 

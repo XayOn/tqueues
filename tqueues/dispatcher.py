@@ -12,11 +12,11 @@ Usage:
     tqueues_dispatcher --version
 
 Options:
-    --host "127.0.0.1"                          Rethinkdb host
-    --db "db"                                   Rethinkdb databaes
-    --port 28015                                Rethinkdb port
-    --user 'user'                               Rethinkdb user
-    --password 'password'                       Rethinkdb password
+    --host         <host>                       Rethinkdb host
+    --db           <db>                         Rethinkdb databaes
+    --port         <port>                       Rethinkdb port
+    --user         <user>                       Rethinkdb user
+    --password     <password>                   Rethinkdb password
     --allowed_domains 'foo.com,bar.com'         Allowed domains
     --loglevel (DEBUG|INFO)                     Loglevel
     -h   --help                                 Show this screen

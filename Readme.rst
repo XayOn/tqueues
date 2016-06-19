@@ -1,7 +1,7 @@
-Tqueues
+TQueues
 =======
 
-Tqueues (reThinkdb Queues) is a simple python3.5+
+TQueues (reThinkdb Queues) is a simple python3.5+
 library for queueing jobs and processing them in workers using rethinkdb.
 
 
@@ -31,7 +31,11 @@ Features
 Usage
 =====
 
-Tqueues provides two entry points, tqueues-dispatcher and tqueues_worker.
+TQueues provides two entry points, tqueues_dispatcher and tqueues_worker.
+
+TQueues dispatcher must be accesible from all workers, and you need to start
+one worker per parallel task you need. They may be distributed (as long as
+they can reach the dispatcher)
 
 TQueues worker
 --------------
@@ -54,7 +58,7 @@ TQueues worker
     	tqueues_worker --endpoint_url http://127.0.0.1:800/ --queue testqueue
 
 
-Tqueues job dispatcher
+TQueues job dispatcher
 ----------------------
 
 ::

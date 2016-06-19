@@ -3,11 +3,12 @@
 Tqueues job dispatcher.
 
 Usage:
-    tqueues_dispatcher --db "db" --host "127.0.0.1" --port 28015
-    tqueues_dispatcher --db "db" --host "127.0.0.1"
-    tqueues_dispatcher --db "db" --port 28015
-    tqueues_dispatcher --db "db" --user 'user'
-    tqueues_dispatcher --db "db" --password 'password'
+    tqueues_dispatcher --db "db" --queue "queue" --host "127.0.0.1"
+    tqueues_dispatcher --db "db" --queue "queue" --port 28015
+    tqueues_dispatcher --db "db" --queue "queue" --user 'user'
+    tqueues_dispatcher --db "db" --queue "queue" --password 'password'
+    tqueues_dispatcher --db "db" --queue "queue" --loglevel INFO
+    tqueues_dispatcher --db "db" --queue "queue"
     tqueues_dispatcher -h | --help
     tqueues_dispatcher --version
 
